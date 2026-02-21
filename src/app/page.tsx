@@ -50,6 +50,12 @@ export default function HomePage() {
           >
             Simulazione
           </Link>
+          <Link
+            href="/freeplay"
+            className={`${linkButtonClass} bg-purple-600 hover:bg-purple-500 active:bg-purple-700 text-white`}
+          >
+            Free Play
+          </Link>
         </div>
 
         <div className="mt-12 w-full max-w-md">
