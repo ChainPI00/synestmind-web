@@ -4,7 +4,6 @@ import React, {
   createContext,
   useCallback,
   useContext,
-  useEffect,
   useRef,
   useState,
 } from "react";
@@ -18,6 +17,7 @@ export interface MidiContextValue {
   midiDeviceName: string | null;
   lastNoteOn: { pitch: number; velocity: number } | null;
   error: string | null;
+  requestAccess: () => Promise<void>;
   subscribeNoteOn: (cb: (pitch: number, velocity: number) => void) => () => void;
   subscribeNoteOff: (cb: (pitch: number) => void) => () => void;
 }
@@ -39,20 +39,32 @@ interface MIDIMessageEvent {
   data: Uint8Array;
 }
 
+type NavWithMidi = Navigator & {
+  requestMIDIAccess?: (o?: { sysex?: boolean }) => Promise<unknown>;
+};
+
 export function MidiProvider({ children }: { children: React.ReactNode }) {
-  const [isSupported, setIsSupported] = useState(false);
+  const [isSupported, setIsSupported] = useState(() =>
+    typeof navigator !== "undefined" && "requestMIDIAccess" in navigator
+  );
   const [isConnected, setIsConnected] = useState(false);
   const [midiDeviceName, setMidiDeviceName] = useState<string | null>(null);
   const [lastNoteOn, setLastNoteOn] = useState<{
     pitch: number;
     velocity: number;
   } | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(
+    typeof navigator !== "undefined" && "requestMIDIAccess" in navigator
+      ? null
+      : "Web MIDI non supportato in questo browser"
+  );
 
   const noteOnSubs = useRef<Set<(pitch: number, velocity: number) => void>>(
     new Set()
   );
   const noteOffSubs = useRef<Set<(pitch: number) => void>>(new Set());
+  const midiAccessRef = useRef<MIDIAccess | null>(null);
+  const connectedRef = useRef(false);
 
   const subscribeNoteOn = useCallback(
     (cb: (pitch: number, velocity: number) => void) => {
@@ -90,25 +102,15 @@ export function MidiProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  useEffect(() => {
-    const supported =
-      typeof navigator !== "undefined" && "requestMIDIAccess" in navigator;
-    setIsSupported(!!supported);
-
-    if (!supported) {
-      setError("Web MIDI non supportato in questo browser");
-      return;
-    }
-
-    let midiAccess: MIDIAccess | null = null;
-
-    const connect = (access: MIDIAccess) => {
-      midiAccess = access;
+  const bindInputs = useCallback(
+    (access: MIDIAccess) => {
+      midiAccessRef.current = access;
       const inputs = access.inputs;
       if (inputs.size === 0) {
         setIsConnected(false);
+        connectedRef.current = false;
         setMidiDeviceName(null);
-        setError("Nessun dispositivo MIDI. Collega il piano.");
+        setError("Nessun dispositivo MIDI trovato. Collega il piano e riprova.");
         return;
       }
       const firstInput = inputs.values().next().value as MIDIInput;
@@ -116,49 +118,57 @@ export function MidiProvider({ children }: { children: React.ReactNode }) {
 
       firstInput.onmidimessage = (ev: MIDIMessageEvent) => handleMessage(ev);
       setIsConnected(true);
+      connectedRef.current = true;
       setMidiDeviceName(firstInput.name);
       setError(null);
-    };
+    },
+    [handleMessage]
+  );
 
-    const onStateChange = () => {
-      if (!midiAccess) return;
-      const inputs = midiAccess.inputs;
-      if (inputs.size === 0) {
-        setIsConnected(false);
-        setMidiDeviceName(null);
-        setError("Dispositivo MIDI disconnesso");
-      } else {
-        const firstInput = inputs.values().next().value as MIDIInput;
-        if (firstInput) {
-          firstInput.onmidimessage = (ev: MIDIMessageEvent) =>
-            handleMessage(ev);
-          setIsConnected(true);
-          setMidiDeviceName(firstInput.name);
-          setError(null);
-        }
-      }
-    };
-
-    const nav = navigator as Navigator & { requestMIDIAccess?: (o?: { sysex?: boolean }) => Promise<MIDIAccess> };
-    if (nav.requestMIDIAccess) {
-      nav.requestMIDIAccess.call(navigator, { sysex: false })
-        .then((access) => {
-          (access as unknown as MIDIAccess).onstatechange = onStateChange;
-          connect(access as unknown as MIDIAccess);
-        })
-        .catch((err) => {
-          setError(err?.message ?? "Impossibile accedere al MIDI");
-        });
+  const requestAccess = useCallback(async () => {
+    if (typeof navigator === "undefined") return;
+    const nav = navigator as NavWithMidi;
+    if (!nav.requestMIDIAccess) {
+      setIsSupported(false);
+      setError("Web MIDI non supportato in questo browser");
+      return;
     }
 
-    return () => {
-      if (midiAccess) {
-        midiAccess.inputs.forEach((input) => {
-          input.onmidimessage = null;
-        });
-      }
-    };
-  }, [handleMessage]);
+    setError(null);
+
+    try {
+      const access = (await nav.requestMIDIAccess.call(navigator, {
+        sysex: false,
+      })) as unknown as MIDIAccess;
+
+      access.onstatechange = () => {
+        if (!midiAccessRef.current) return;
+        const inputs = midiAccessRef.current.inputs;
+        if (inputs.size === 0) {
+          setIsConnected(false);
+          connectedRef.current = false;
+          setMidiDeviceName(null);
+          setError("Dispositivo MIDI disconnesso. Tocca per riconnettere.");
+        } else {
+          const firstInput = inputs.values().next().value as MIDIInput;
+          if (firstInput) {
+            firstInput.onmidimessage = (ev: MIDIMessageEvent) =>
+              handleMessage(ev);
+            setIsConnected(true);
+            connectedRef.current = true;
+            setMidiDeviceName(firstInput.name);
+            setError(null);
+          }
+        }
+      };
+
+      bindInputs(access);
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : "Impossibile accedere al MIDI";
+      setError(msg);
+    }
+  }, [handleMessage, bindInputs]);
 
   const value: MidiContextValue = {
     isSupported,
@@ -166,6 +176,7 @@ export function MidiProvider({ children }: { children: React.ReactNode }) {
     midiDeviceName,
     lastNoteOn,
     error,
+    requestAccess,
     subscribeNoteOn,
     subscribeNoteOff,
   };
