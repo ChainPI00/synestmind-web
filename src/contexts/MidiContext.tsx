@@ -139,10 +139,9 @@ export function MidiProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
-    const req = (navigator as Navigator & { requestMIDIAccess?: (o?: { sysex?: boolean }) => Promise<MIDIAccess> })
-      .requestMIDIAccess;
-    if (req) {
-      req({ sysex: false })
+    const nav = navigator as Navigator & { requestMIDIAccess?: (o?: { sysex?: boolean }) => Promise<MIDIAccess> };
+    if (nav.requestMIDIAccess) {
+      nav.requestMIDIAccess.call(navigator, { sysex: false })
         .then((access) => {
           (access as unknown as MIDIAccess).onstatechange = onStateChange;
           connect(access as unknown as MIDIAccess);

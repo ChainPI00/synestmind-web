@@ -119,8 +119,7 @@ export function useMidi(options: UseMidiOptions = {}): MidiState {
       }));
     };
 
-    const req = (navigator as Navigator & { requestMIDIAccess?: (o?: { sysex?: boolean }) => Promise<MIDIAccess> })
-      .requestMIDIAccess;
+    const nav = navigator as Navigator & { requestMIDIAccess?: (o?: { sysex?: boolean }) => Promise<MIDIAccess> };
     const onStateChange = () => {
       if (!midiAccess) return;
       const inputs = midiAccess.inputs;
@@ -146,8 +145,8 @@ export function useMidi(options: UseMidiOptions = {}): MidiState {
       }
     };
 
-    if (req) {
-      req({ sysex: false })
+    if (nav.requestMIDIAccess) {
+      nav.requestMIDIAccess.call(navigator, { sysex: false })
         .then((access) => {
           (access as unknown as MIDIAccess).onstatechange = onStateChange;
           connect(access as unknown as MIDIAccess);
