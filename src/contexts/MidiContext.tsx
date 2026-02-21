@@ -4,6 +4,7 @@ import React, {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useRef,
   useState,
 } from "react";
@@ -44,20 +45,23 @@ type NavWithMidi = Navigator & {
 };
 
 export function MidiProvider({ children }: { children: React.ReactNode }) {
-  const [isSupported, setIsSupported] = useState(() =>
-    typeof navigator !== "undefined" && "requestMIDIAccess" in navigator
-  );
+  const [isSupported, setIsSupported] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [midiDeviceName, setMidiDeviceName] = useState<string | null>(null);
   const [lastNoteOn, setLastNoteOn] = useState<{
     pitch: number;
     velocity: number;
   } | null>(null);
-  const [error, setError] = useState<string | null>(
-    typeof navigator !== "undefined" && "requestMIDIAccess" in navigator
-      ? null
-      : "Web MIDI non supportato in questo browser"
-  );
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const supported =
+      typeof navigator !== "undefined" && "requestMIDIAccess" in navigator;
+    setIsSupported(supported);
+    if (!supported) {
+      setError("Web MIDI non supportato in questo browser");
+    }
+  }, []);
 
   const noteOnSubs = useRef<Set<(pitch: number, velocity: number) => void>>(
     new Set()
